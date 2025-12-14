@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
 """
-Automasi preprocessing dataset Titanic untuk Kriteria 1 (Skilled/3 pts).
+Automasi preprocessing dataset Titanic (Kriteria 1 - Skilled/3 pts)
 
-Input  : ../namadataset_raw/titanic_raw.csv
-Output : ../namadataset_preprocessing/titanic_preprocessing.csv
+Preprocessing yang dilakukan (sama seperti notebook):
+1) Missing Values:
+   - Age: fill median
+   - Embarked: fill mode
+   - Drop kolom Cabin (karena missing terlalu banyak)
+2) Hapus duplikat
+3) Encoding kategorikal:
+   - Sex: LabelEncoder
+   - Embarked: LabelEncoder
+4) Scaling:
+   - Age dan Fare: MinMaxScaler
+5) Simpan hasil ke CSV
 
-Menjalankan:
-python3 automate_M.Adam-Abdurrahman.py \
+Cara menjalankan:
+python automate_M.Adam-Abdurrahman.py \
   --input ../namadataset_raw/titanic_raw.csv \
   --output ../namadataset_preprocessing/titanic_preprocessing.csv
 """
@@ -18,55 +28,59 @@ import os
 import sys
 import pandas as pd
 
-
-DROP_COLS_DEFAULT = ["Name", "Ticket", "Cabin"]  # bisa kamu sesuaikan
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 
 
 def load_raw(csv_path: str) -> pd.DataFrame:
     if not os.path.exists(csv_path):
         raise FileNotFoundError(f"File input tidak ditemukan: {csv_path}")
-    df = pd.read_csv(csv_path)
-    return df
+    return pd.read_csv(csv_path)
 
 
-def preprocess(df: pd.DataFrame, drop_cols: list[str] | None = None) -> pd.DataFrame:
-    """
-    Preprocessing yang aman dan umum untuk Titanic:
-    - Drop kolom tidak relevan (Name, Ticket, Cabin) jika ada
-    - Handle missing value: Age (median), Embarked (mode)
-    - One-hot encoding untuk: Sex, Embarked
-    - Pastikan target (Survived) tetap ada jika memang ada di input
-    """
+def preprocess(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
-    # --- Drop kolom jika ada ---
-    drop_cols = drop_cols or []
-    cols_to_drop = [c for c in drop_cols if c in df.columns]
-    if cols_to_drop:
-        df = df.drop(columns=cols_to_drop)
-
-    # --- Missing values ---
+    # 1) Missing values
     if "Age" in df.columns:
-        df["Age"] = df["Age"].fillna(df["Age"].median())
+        df["Age"].fillna(df["Age"].median(), inplace=True)
 
     if "Embarked" in df.columns:
-        # mode bisa kosong kalau kolomnya semua NaN, jadi guard
+        # mode()[0] akan error kalau semua NaN, jadi guard
         if df["Embarked"].dropna().empty:
-            df["Embarked"] = df["Embarked"].fillna("Unknown")
+            df["Embarked"].fillna("Unknown", inplace=True)
         else:
-            df["Embarked"] = df["Embarked"].fillna(df["Embarked"].mode()[0])
+            df["Embarked"].fillna(df["Embarked"].mode()[0], inplace=True)
 
-    # --- One-hot encode untuk kolom kategori (aman jika kolomnya tidak ada) ---
-    cat_cols = [c for c in ["Sex", "Embarked"] if c in df.columns]
-    if cat_cols:
-        df = pd.get_dummies(df, columns=cat_cols, drop_first=False)
+    if "Cabin" in df.columns:
+        df.drop(columns=["Cabin"], inplace=True)
 
-    # --- Bersihkan sisa missing value numerik (opsional aman) ---
-    # (Jika ada kolom numerik lain yang NaN, isi median kolom)
-    for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            if df[col].isnull().any():
-                df[col] = df[col].fillna(df[col].median())
+    # 2) Hapus duplikat
+    dup_before = int(df.duplicated().sum())
+    df.drop_duplicates(inplace=True)
+    dup_after = int(df.duplicated().sum())
+
+    # 3) Encoding kategorikal (LabelEncoder)
+    # Catatan: LabelEncoder cocok untuk binary/ordinal sederhana. Untuk model tertentu,
+    # OneHotEncoder bisa lebih baik, tapi kita samakan dengan notebook.
+    if "Sex" in df.columns:
+        le_sex = LabelEncoder()
+        df["Sex"] = le_sex.fit_transform(df["Sex"].astype(str))
+
+    if "Embarked" in df.columns:
+        le_emb = LabelEncoder()
+        df["Embarked"] = le_emb.fit_transform(df["Embarked"].astype(str))
+
+    # 4) Scaling (MinMaxScaler) untuk Age & Fare
+    cols_to_scale = [c for c in ["Age", "Fare"] if c in df.columns]
+    if cols_to_scale:
+        scaler = MinMaxScaler()
+        df[cols_to_scale] = scaler.fit_transform(df[cols_to_scale])
+
+    # Logging ringkas seperti di notebook
+    print(f"Jumlah duplikat sebelum: {dup_before}")
+    print(f"Jumlah duplikat sesudah : {dup_after}")
+    print("\nMissing values setelah preprocessing:")
+    print(df.isnull().sum())
 
     return df
 
@@ -78,9 +92,7 @@ def save_processed(df: pd.DataFrame, output_path: str) -> None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description="Automasi preprocessing dataset Titanic (Kriteria 1 - Skilled)."
-    )
+    p = argparse.ArgumentParser(description="Automasi preprocessing Titanic (Skilled).")
     p.add_argument(
         "--input",
         default="../namadataset_raw/titanic_raw.csv",
@@ -91,32 +103,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="../namadataset_preprocessing/titanic_preprocessing.csv",
         help="Path CSV output (preprocessed). Default: ../namadataset_preprocessing/titanic_preprocessing.csv",
     )
-    p.add_argument(
-        "--drop-cols",
-        default=",".join(DROP_COLS_DEFAULT),
-        help=f"Daftar kolom yang ingin di-drop (pisahkan koma). Default: {DROP_COLS_DEFAULT}",
-    )
     return p
 
 
 def main() -> int:
-    parser = build_arg_parser()
-    args = parser.parse_args()
-
-    drop_cols = [c.strip() for c in args.drop_cols.split(",") if c.strip()]
+    args = build_arg_parser().parse_args()
 
     try:
         df_raw = load_raw(args.input)
-        df_processed = preprocess(df_raw, drop_cols=drop_cols)
+        print("✅ Data raw berhasil dimuat")
+        print(f"- Shape raw: {df_raw.shape}")
+
+        df_processed = preprocess(df_raw)
+
         save_processed(df_processed, args.output)
 
-        print("✅ Preprocessing berhasil!")
-        print(f"- Input  : {os.path.abspath(args.input)}")
-        print(f"- Output : {os.path.abspath(args.output)}")
-        print(f"- Shape  : {df_processed.shape}")
+        print("\n✅ Preprocessing selesai dan data disimpan")
+        print(f"- Output: {os.path.abspath(args.output)}")
+        print(f"- Shape processed: {df_processed.shape}")
         return 0
     except Exception as e:
-        print(f"❌ Gagal preprocessing: {e}", file=sys.stderr)
+        print(f"❌ Gagal menjalankan preprocessing: {e}", file=sys.stderr)
         return 1
 
 
