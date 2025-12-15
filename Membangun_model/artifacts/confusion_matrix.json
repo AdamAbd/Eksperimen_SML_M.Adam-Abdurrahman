@@ -1,0 +1,16 @@
+{
+  "confusion_matrix": [
+    [
+      97,
+      13
+    ],
+    [
+      22,
+      47
+    ]
+  ],
+  "labels": [
+    "0 (not survived)",
+    "1 (survived)"
+  ]
+}
